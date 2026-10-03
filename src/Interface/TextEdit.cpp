@@ -24,6 +24,7 @@
 #include "../Engine/Options.h"
 #include "../Engine/Language.h"
 #include "../fallthrough.h"
+#include "../Engine/Xr/XrRuntime.h"
 
 namespace OpenXcom
 {
@@ -142,6 +143,14 @@ void TextEdit::setFocus(bool focus, bool modal)
  */
 void TextEdit::_startTextInput()
 {
+	if (Xr::active())
+	{
+		// The VR keyboard follows SDL's text input state; never open the Android IME.
+		SDL_EventState(SDL_TEXTINPUT, SDL_ENABLE);
+		SDL_EventState(SDL_TEXTEDITING, SDL_ENABLE);
+		_isKeyboardActive = true;
+		return;
+	}
 	if (!SDL_IsScreenKeyboardShown(NULL))
 	{
 		SDL_Rect r;

@@ -16,7 +16,8 @@ namespace OpenXcom
 enum RendererType
 {
 	RENDERER_SDL2,
-	RENDERER_OPENGL
+	RENDERER_OPENGL,
+	RENDERER_XR
 };
 
 class Renderer

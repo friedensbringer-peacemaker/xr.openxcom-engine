@@ -99,6 +99,8 @@ public:
 	void setMouseActive(bool active);
 	/// Returns whether current state is the param state
 	bool isState(State *state) const;
+	/// Returns the state on top of the stack (Quest self-test).
+	State *getTopState() const { return _states.empty() ? 0 : _states.back(); }
 	/// Returns whether a UfopaediaStartState is in the background.
 	bool containsUfopaediaStartState() const;
 	/// Returns whether a NotesState is in the background.

@@ -44,6 +44,10 @@
 #include "../Geoscape/GeoscapeState.h"
 #include "../Menu/TestState.h"
 #include "../fallthrough.h"
+#include "Xr/XrRuntime.h"
+#include "Xr/XrSelfTest.h"
+#include "../Menu/VrMenuState.h"
+#include "../Menu/VrOptionsState.h"
 
 namespace OpenXcom
 {
@@ -75,6 +79,26 @@ Game::Game(const std::string &title) : _screen(0), _cursor(0), _lang(0), _save(0
 
 	// Set up unicode
 	Unicode::getUtf8Locale();
+
+	// Immersive Quest mode: the game renders for a fixed virtual display
+	if (Xr::start(Options::getConfigFolder()))
+	{
+		Options::displayWidth = Xr::VirtualWidth;
+		Options::displayHeight = Xr::VirtualHeight;
+		// The ray leaves the canvas all the time; edge scrolling would run away (stick scrolls instead).
+		Options::battleEdgeScroll = SCROLL_NONE;
+		Log(LOG_INFO) << "Immersive mode, virtual display " << Xr::VirtualWidth << "x" << Xr::VirtualHeight;
+		// VR defaults, once: the 320x200 picture is enlarged a lot on the canvas, so upscale it
+		// with xBRZ (smooth pixel font). Afterwards the setting belongs to the player.
+		if (Xr::takeFirstRunDefaults())
+		{
+			Options::useXBRZFilter = true;
+			Options::useHQXFilter = false;
+			Options::save();
+			Log(LOG_INFO) << "VR defaults applied: xBRZ upscaling on";
+		}
+		Xr::selfTestBegin();
+	}
 
 	// Create display
 	_screen = new Screen();
@@ -126,6 +150,8 @@ Game::~Game()
 	delete _fpsCounter;
 
 	Mix_CloseAudio();
+
+	Xr::stop();
 
 	SDL_Quit();
 }
@@ -432,6 +458,11 @@ void Game::run()
 					switch(_event.window.event)
 					{
 						case SDL_WINDOWEVENT_RESIZED:
+							// Immersive mode keeps its fixed virtual display; the Android surface size is irrelevant.
+							if (Xr::active())
+							{
+								break;
+							}
 							// It should be better to handle SDL_WINDOWEVENT_SIZE_CHANGED, but
 							// it won't tell the new width and height.
 							// New width is in data1, new height is in data2.
@@ -563,6 +594,36 @@ void Game::run()
 			}
 		}
 
+		// Immersive mode: VR menu requests from the controllers; headset off or Quest menu = pause
+		if (Xr::active())
+		{
+			Xr::setContext(!_save ? Xr::CONTEXT_MENU : _save->getSavedBattle() ? Xr::CONTEXT_BATTLESCAPE : Xr::CONTEXT_GEOSCAPE);
+			const int request = Xr::takeMenuRequest();
+			if (request != Xr::MENU_REQUEST_NONE)
+			{
+				State *top = _states.back();
+				const bool optionsOpen = dynamic_cast<VrOptionsState*>(top) != 0;
+				const bool menuOpen = optionsOpen || dynamic_cast<VrMenuState*>(top) != 0;
+				if (menuOpen && request == Xr::MENU_REQUEST_TOGGLE)
+				{
+					popState();
+					if (optionsOpen)
+					{
+						popState();
+					}
+				}
+				else if (!menuOpen && VrMenuState::canOpen(this) && !SDL_IsTextInputActive())
+				{
+					pushState(new VrMenuState(VrMenuState::currentOrigin(this), request == Xr::MENU_REQUEST_RESUME));
+				}
+			}
+			// Ray and target dot stay visible on the VR menu pages even when switched off.
+			State *topState = _states.back();
+			Xr::setMenuOpen(dynamic_cast<VrMenuState*>(topState) != 0 || dynamic_cast<VrOptionsState*>(topState) != 0);
+			runningState = Xr::gameShouldRun() ? RUNNING : PAUSED;
+			Xr::selfTestTick(this);
+		}
+
 		// Process rendering
 		if (runningState != PAUSED)
 		{
@@ -598,7 +659,11 @@ void Game::run()
 					(*i)->blit();
 				}
 				_fpsCounter->blit(_screen->getSurface());
-				_cursor->blit(_screen->getSurface());
+				// VR option "game cursor off": the controller ray/dot points instead.
+				if (!Xr::active() || Xr::settings().showGameCursor)
+				{
+					_cursor->blit(_screen->getSurface());
+				}
 				_screen->flip();
 			}
 		}
@@ -878,6 +943,7 @@ void Game::loadLanguages()
 	const std::string dirLanguageAndroid = "Language/Android/";
 	const std::string dirLanguageOXCE = "Language/OXCE/";
 	const std::string dirLanguageTechnical = "Language/Technical/";
+	const std::string dirLanguageXR = "Language/XR/"; // Quest port: VR menu texts
 
 	const std::string defaultLangYml = defaultLang + ".yml";
 	const std::string currentLangYml = currentLang + ".yml";
@@ -889,11 +955,13 @@ void Game::loadLanguages()
 	auto sliceAndroid = FileMap::getSlice(dirLanguageAndroid + defaultLangYml);
 	auto sliceOXCE = FileMap::getSlice(dirLanguageOXCE + defaultLangYml);
 	auto sliceTechnical = FileMap::getSlice(dirLanguageTechnical + defaultLangYml);
+	auto sliceXR = FileMap::getSlice(dirLanguageXR + defaultLangYml);
 
 	auto slice2 = FileMap::getSlice(dirLanguage + currentLangYml);
 	auto sliceAndroid2 = FileMap::getSlice(dirLanguageAndroid + currentLangYml);
 	auto sliceOXCE2 = FileMap::getSlice(dirLanguageOXCE + currentLangYml);
 	auto sliceTechnical2 = FileMap::getSlice(dirLanguageTechnical + currentLangYml);
+	auto sliceXR2 = FileMap::getSlice(dirLanguageXR + currentLangYml);
 
 	bool twoLangs = currentLang != defaultLang;
 	for (size_t i = 0; i < slice.size(); ++i) {
@@ -905,6 +973,8 @@ void Game::loadLanguages()
 		if (twoLangs && sliceOXCE2[i]) { _lang->loadFile(sliceOXCE2[i]); }
 		if (sliceTechnical[i]) { _lang->loadFile(sliceTechnical[i]); }
 		if (twoLangs && sliceTechnical2[i]) { _lang->loadFile(sliceTechnical2[i]); }
+		if (sliceXR[i]) { _lang->loadFile(sliceXR[i]); }
+		if (twoLangs && sliceXR2[i]) { _lang->loadFile(sliceXR2[i]); }
 	}
 
 	_lang->loadRule(_mod->getExtraStrings(), defaultLang);

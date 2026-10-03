@@ -36,6 +36,8 @@
 #include <SDL.h>
 #include "Renderer.h"
 #include "SDLRenderer.h"
+#include "Xr/XrRenderer.h"
+#include "Xr/XrRuntime.h"
 
 namespace OpenXcom
 {
@@ -266,6 +268,8 @@ const SDL_Color *Screen::getPalette() const
  */
 int Screen::getWidth() const
 {
+	if (Xr::active())
+		return Xr::VirtualWidth;
 	int w, h;
 	SDL_GetWindowSize(_window, &w, &h);
 	return w;
@@ -277,6 +281,8 @@ int Screen::getWidth() const
  */
 int Screen::getHeight() const
 {
+	if (Xr::active())
+		return Xr::VirtualHeight;
 	int w, h;
 	SDL_GetWindowSize(_window, &w, &h);
 	return h;
@@ -407,7 +413,11 @@ void Screen::resetDisplay(bool resetVideo, bool noShaders)
 
 		if (!_renderer)
 		{
-			if (Options::useSoftwareRenderer)
+			if (Xr::active())
+			{
+				_renderer = new XrRenderer();
+			}
+			else if (Options::useSoftwareRenderer)
 			{
 				_renderer = new SDLRenderer(_window, -1, SDL_RENDERER_SOFTWARE);
 			}
